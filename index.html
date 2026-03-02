@@ -229,7 +229,7 @@
     <div class="wb-steps">
       <strong>Step 1:</strong> Let this stream run for 5–10 minutes to capture vessels.<br>
       <strong>Step 2:</strong> Click <strong>"⬇ Export CSV"</strong> to download the IMO list.<br>
-      <strong>Step 3:</strong> Upload those IMOs into your internal database  → export with DWT, Owner, Year Built etc.<br>
+      <strong>Step 3:</strong> Upload those IMOs into your internal database (Clarksons / Gibson / Equasis) → export with DWT, Owner, Year Built etc.<br>
       <strong>Step 4:</strong> Go back to the start screen, select <strong>"Upload Enriched Data"</strong>, and upload the enriched file for full analysis.
     </div>
   </div>
@@ -582,7 +582,7 @@ function connectWS() {
     $("statusDot").className = "status-dot live";
     $("statusText").textContent = "LIVE"; $("statusText").style.color = "#86efac";
     ws.send(JSON.stringify({
-      Apikey: apiKey,
+      APIKey: apiKey,
       BoundingBoxes: [AG_BBOX],
       FilterMessageTypes: ["ShipStaticData","PositionReport","StandardClassBPositionReport"],
     }));
@@ -629,16 +629,24 @@ function connectWS() {
     } catch(e) {}
   };
 
-  ws.onerror = () => {
-    $("errorBar").textContent = "WebSocket error — check your API key.";
+  ws.onerror = (err) => {
+    $("errorBar").textContent = "WebSocket error — check your API key and try refreshing the page.";
     $("errorBar").style.display = "block";
     $("statusDot").className = "status-dot off";
     $("statusText").textContent = "ERROR"; $("statusText").style.color = "#fca5a5";
+    console.error("WS error:", err);
   };
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     $("statusDot").className = "status-dot off";
-    $("statusText").textContent = "RECONNECTING..."; $("statusText").style.color = "#fca5a5";
-    reconnectTimer = setTimeout(connectWS, 5000);
+    if (event.code === 1008 || event.code === 1003) {
+      $("errorBar").textContent = "Connection rejected — invalid API key or malformed subscription. Code: " + event.code + " Reason: " + (event.reason || "none");
+      $("errorBar").style.display = "block";
+      $("statusText").textContent = "REJECTED"; $("statusText").style.color = "#fca5a5";
+    } else {
+      $("statusText").textContent = "RECONNECTING..."; $("statusText").style.color = "#fca5a5";
+      reconnectTimer = setTimeout(connectWS, 5000);
+    }
+    console.log("WS closed:", event.code, event.reason);
   };
 }
 

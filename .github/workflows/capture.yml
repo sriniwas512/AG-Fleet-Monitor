@@ -19,10 +19,10 @@ jobs:
       - name: Install dependencies
         run: pip install websockets
 
-      - name: Run AIS capture (5 minutes)
+      - name: Run AIS capture (30 minutes)
         env:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
-          CAPTURE_DURATION: '1200'
+          CAPTURE_DURATION: '1800'
           OUTPUT_FILE: 'data/ag_fleet_latest.csv'
         run: |
           mkdir -p data

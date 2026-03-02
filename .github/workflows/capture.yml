@@ -22,7 +22,7 @@ jobs:
       - name: Run AIS capture (5 minutes)
         env:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
-          CAPTURE_DURATION: '300'
+          CAPTURE_DURATION: '1200'
           OUTPUT_FILE: 'data/ag_fleet_latest.csv'
         run: |
           mkdir -p data

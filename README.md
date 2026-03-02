@@ -69,7 +69,7 @@ on:
 | Lat / Lon | Last known position |
 
 ### To get DWT & Owner
-Take the IMO numbers from the CSV → look up in Clarksons, Equasis, or your internal Gibson database → export enriched data → upload into the dashboard.
+Take the IMO numbers from the CSV → look up in your internal database → export enriched data → upload into the dashboard.
 
 ## Coverage
 

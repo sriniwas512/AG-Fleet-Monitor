@@ -1,0 +1,42 @@
+name: Capture AG Fleet Data
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install websockets
+
+      - name: Run AIS capture (5 minutes)
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          CAPTURE_DURATION: '300'
+          OUTPUT_FILE: 'data/ag_fleet_latest.csv'
+        run: |
+          mkdir -p data
+          python capture.py
+
+      - name: Also save a timestamped copy
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d_%H%M")
+          cp data/ag_fleet_latest.csv "data/ag_fleet_${TIMESTAMP}.csv"
+
+      - name: Commit and push CSV
+        run: |
+          git config user.name "AG Fleet Bot"
+          git config user.email "bot@agfleet.local"
+          git add data/
+          git diff --staged --quiet || git commit -m "🚢 Fleet data update $(date -u +"%Y-%m-%d %H:%M UTC")"
+          git push

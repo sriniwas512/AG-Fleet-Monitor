@@ -7,7 +7,7 @@
 
 A two-mode fleet intelligence tool:
 1. **Live AIS Stream** — captures all vessels currently west of the Strait of Hormuz in real-time
-2. **Upload Enriched Data** — upload your CSV/Excel from Clarksons, Equasis, or any internal database with DWT, Owner, Year Built etc. for full fleet analysis
+2. **Upload Enriched Data** — upload your CSV/Excel from  with DWT, Owner, Year Built etc. for full fleet analysis
 
 ## Coverage Area
 
@@ -28,7 +28,7 @@ A two-mode fleet intelligence tool:
 3. Click **"Export CSV"** to download the list with IMO numbers
 
 ### Mode 2: Enrich → Re-upload for Analysis
-4. Take the exported IMO list and look them up in your internal database (Clarksons, Gibson, Equasis, etc.)
+4. Take the exported IMO list and look them up in your internal database 
 5. Export the enriched data (with DWT, Owner, Year Built, etc.) as CSV or Excel
 6. Open the tool again, select **"Upload Enriched Data"**, drop in your file
 7. The dashboard displays the full enriched fleet view with DWT, Owner, and all columns

@@ -17,11 +17,13 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install websockets
+        run: pip install -r requirements.txt
 
       - name: Run AIS capture (30 minutes)
         env:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          PLANET_API_KEY: ${{ secrets.PLANET_API_KEY }}
+          PLANET_COLLECTION_ID: ${{ secrets.PLANET_COLLECTION_ID }}
           CAPTURE_DURATION: '1800'
           OUTPUT_FILE: 'data/ag_fleet_latest.csv'
         run: |

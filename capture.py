@@ -3,6 +3,9 @@ Arabian Gulf Fleet Monitor — AIS Data Capture Script
 Connects to aisstream.io WebSocket, captures all vessels west of the
 Strait of Hormuz for a set duration, and saves results as CSV.
 
+Optionally enriches data with Planet Insights satellite vessel detections.
+Requires PLANET_API_KEY and PLANET_COLLECTION_ID to enable Planet data.
+
 Designed to run via GitHub Actions or locally.
 """
 
@@ -14,12 +17,22 @@ import os
 import sys
 from datetime import datetime, timezone
 
+try:
+    import aiohttp
+    HAS_AIOHTTP = True
+except ImportError:
+    HAS_AIOHTTP = False
+
 # ============================================================
 #  CONFIG
 # ============================================================
 API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
 CAPTURE_DURATION_SECONDS = int(os.environ.get("CAPTURE_DURATION", "300"))  # default 5 mins
 OUTPUT_FILE = os.environ.get("OUTPUT_FILE", "ag_fleet_latest.csv")
+
+# Planet Insights config (optional — skipped if not set)
+PLANET_API_KEY = os.environ.get("PLANET_API_KEY", "")
+PLANET_COLLECTION_ID = os.environ.get("PLANET_COLLECTION_ID", "")
 
 # Arabian Gulf bounding box (rectangle that covers the AG)
 AG_BBOX = [[23.5, 48.0], [30.5, 56.5]]
@@ -128,6 +141,150 @@ def is_in_ag(lat, lon):
 
 
 # ============================================================
+#  PLANET INSIGHTS INTEGRATION
+# ============================================================
+async def fetch_planet_vessels():
+    """
+    Fetch satellite-detected vessels from Planet Insights Platform.
+
+    Uses the Planet Analytics API to retrieve vessel detections within
+    the Arabian Gulf bounding box. Vessels matched to AIS data by MMSI
+    are flagged 'AIS+Satellite'; unmatched detections are flagged
+    'Satellite' (potential dark/non-broadcasting vessels).
+
+    Returns a dict keyed by MMSI (or 'PLN_<idx>' for unidentified vessels).
+    Returns empty dict if Planet credentials are not configured.
+    """
+    if not PLANET_API_KEY or not PLANET_COLLECTION_ID:
+        print("  [Planet] Skipping: PLANET_API_KEY or PLANET_COLLECTION_ID not set.")
+        return {}
+
+    if not HAS_AIOHTTP:
+        print("  [Planet] Skipping: aiohttp not installed.")
+        return {}
+
+    print("  [Planet] Fetching satellite vessel detections from Planet Insights...")
+
+    min_lat, min_lon = AG_BBOX[0]
+    max_lat, max_lon = AG_BBOX[1]
+    # WKT polygon covering the Arabian Gulf bounding box
+    geometry = (
+        f"POLYGON(({min_lon} {min_lat},{max_lon} {min_lat},"
+        f"{max_lon} {max_lat},{min_lon} {max_lat},{min_lon} {min_lat}))"
+    )
+
+    url = f"https://api.planet.com/analytics/collections/{PLANET_COLLECTION_ID}/items"
+    headers = {"Authorization": f"api-key {PLANET_API_KEY}"}
+    params = {"geometry": geometry, "limit": 1000}
+
+    planet_vessels = {}
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers, params=params) as resp:
+                if resp.status == 401:
+                    print("  [Planet] Auth error: check PLANET_API_KEY.")
+                    return {}
+                if resp.status == 404:
+                    print("  [Planet] Collection not found: check PLANET_COLLECTION_ID.")
+                    return {}
+                if resp.status != 200:
+                    print(f"  [Planet] API error: HTTP {resp.status}")
+                    return {}
+                data = await resp.json()
+    except Exception as e:
+        print(f"  [Planet] Request failed: {e}")
+        return {}
+
+    features = data.get("features", [])
+    print(f"  [Planet] Received {len(features)} satellite detections.")
+
+    for idx, feat in enumerate(features):
+        props = feat.get("properties", {})
+        geom = feat.get("geometry", {})
+        coords = geom.get("coordinates", [None, None])
+        lon_p = coords[0] if coords else None
+        lat_p = coords[1] if coords else None
+
+        if lat_p and lon_p and not is_in_ag(lat_p, lon_p):
+            continue
+
+        mmsi = str(props.get("mmsi", "")).strip().lstrip("0") or ""
+        # Re-pad MMSI to 9 digits if it was stripped
+        if mmsi and mmsi.isdigit():
+            mmsi = mmsi.zfill(9)
+
+        imo_raw = props.get("imo", 0)
+        imo = int(imo_raw) if imo_raw and str(imo_raw).isdigit() else 0
+
+        ts_raw = props.get("timestamp", "")
+        if ts_raw:
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                last_seen = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+            except ValueError:
+                last_seen = ts_raw
+        else:
+            last_seen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        key = mmsi if mmsi else f"PLN_{idx}"
+
+        v = {
+            "mmsi": mmsi,
+            "imo": imo if imo > 0 else "",
+            "name": props.get("vessel_name", "").strip(),
+            "lat": lat_p,
+            "lon": lon_p,
+            "length": props.get("length_m"),
+            "beam": props.get("width_m"),
+            "sog": props.get("speed_knots"),
+            "flag": get_flag(mmsi) if mmsi else "",
+            "source": "Satellite",
+            "last_seen": last_seen,
+        }
+
+        planet_vessels[key] = v
+
+    return planet_vessels
+
+
+def merge_planet_into_ais(vessels, planet_vessels):
+    """
+    Merge Planet Insights detections into the AIS vessel dict.
+
+    - AIS vessels matched by MMSI → source upgraded to 'AIS+Satellite';
+      missing dimensions filled from satellite data if available.
+    - Planet-only detections (no matching MMSI in AIS) → added as
+      'Satellite' entries (potential dark/non-broadcasting vessels).
+
+    Returns count of satellite-only (dark) vessel detections.
+    """
+    dark_count = 0
+
+    for key, pv in planet_vessels.items():
+        mmsi = pv.get("mmsi", "")
+        if mmsi and mmsi in vessels:
+            # Matched: enrich AIS record with satellite confirmation
+            v = vessels[mmsi]
+            v["source"] = "AIS+Satellite"
+            if not v.get("length") and pv.get("length"):
+                v["length"] = pv["length"]
+            if not v.get("beam") and pv.get("beam"):
+                v["beam"] = pv["beam"]
+        else:
+            # Unmatched: satellite-only detection (possible dark vessel)
+            vessels[key] = pv
+            dark_count += 1
+
+    # Tag remaining AIS-only vessels
+    for v in vessels.values():
+        if "source" not in v:
+            v["source"] = "AIS"
+
+    return dark_count
+
+
+# ============================================================
 #  MAIN CAPTURE LOGIC
 # ============================================================
 async def capture():
@@ -143,6 +300,10 @@ async def capture():
     print(f"  Bounding box: {AG_BBOX}")
     print(f"  Capture duration: {CAPTURE_DURATION_SECONDS} seconds")
     print(f"  Output file: {OUTPUT_FILE}")
+    if PLANET_API_KEY and PLANET_COLLECTION_ID:
+        print(f"  Planet Insights: enabled (collection {PLANET_COLLECTION_ID})")
+    else:
+        print("  Planet Insights: disabled (set PLANET_API_KEY + PLANET_COLLECTION_ID to enable)")
     print()
 
     try:
@@ -254,18 +415,36 @@ async def capture():
             sys.exit(1)
 
     # ============================================================
+    #  PLANET INSIGHTS ENRICHMENT
+    # ============================================================
+    print(f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Fetching Planet Insights satellite data...")
+    planet_vessels = await fetch_planet_vessels()
+    dark_count = 0
+    if planet_vessels:
+        dark_count = merge_planet_into_ais(vessels, planet_vessels)
+        confirmed = sum(1 for v in vessels.values() if v.get("source") == "AIS+Satellite")
+        print(f"  [Planet] {confirmed} AIS vessels confirmed by satellite.")
+        print(f"  [Planet] {dark_count} satellite-only detections (potential dark vessels).")
+    else:
+        # Tag all vessels as AIS-only when Planet data is unavailable
+        for v in vessels.values():
+            v.setdefault("source", "AIS")
+
+    # ============================================================
     #  SAVE CSV
     # ============================================================
     print(f"\n{'='*60}")
     print(f"  CAPTURE COMPLETE")
-    print(f"  Total messages processed: {msg_count}")
+    print(f"  Total AIS messages processed: {msg_count}")
     print(f"  Unique vessels captured: {len(vessels)}")
+    if planet_vessels:
+        print(f"  Dark ship detections (satellite only): {dark_count}")
     print(f"{'='*60}\n")
 
     headers = [
         "IMO", "MMSI", "Name", "Type_Code", "Type", "Length_m", "Beam_m",
         "Draught_m", "Flag", "Nav_Status", "SOG_kn", "Callsign",
-        "Destination", "Latitude", "Longitude", "Last_Seen",
+        "Destination", "Latitude", "Longitude", "Last_Seen", "Source",
     ]
 
     with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as f:
@@ -289,6 +468,7 @@ async def capture():
                 round(v["lat"], 6) if v.get("lat") else "",
                 round(v["lon"], 6) if v.get("lon") else "",
                 v.get("last_seen", ""),
+                v.get("source", "AIS"),
             ])
 
     print(f"Saved to: {OUTPUT_FILE}")
@@ -306,6 +486,15 @@ async def capture():
     print("\nVessel breakdown:")
     for t, count in sorted(type_counts.items(), key=lambda x: -x[1]):
         print(f"  {t}: {count}")
+
+    if planet_vessels:
+        print(f"\nData sources:")
+        src_counts = {}
+        for v in vessels.values():
+            s = v.get("source", "AIS")
+            src_counts[s] = src_counts.get(s, 0) + 1
+        for s, count in sorted(src_counts.items()):
+            print(f"  {s}: {count}")
 
 
 if __name__ == "__main__":

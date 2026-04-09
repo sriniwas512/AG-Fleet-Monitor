@@ -61,6 +61,7 @@
     .sg { color: #22c55e; } .sy { color: #eab308; } .so { color: #64748b; }
     .empty { padding: 40px; text-align: center; color: #475569; }
     .footer { margin-top: 16px; font-size: 11px; color: #334155; text-align: center; }
+    .src-ais { color: #22d3ee; } .src-sat { color: #f97316; } .src-both { color: #a3e635; }
   </style>
 </head>
 <body>
@@ -98,6 +99,7 @@
     <div class="stat" style="border-left-color:#3b82f6;border-color:#3b82f633"><div class="stat-l">Cargo</div><div class="stat-v" id="sC" style="color:#3b82f6">0</div></div>
     <div class="stat" style="border-left-color:#a855f7;border-color:#a855f733"><div class="stat-l">Passenger</div><div class="stat-v" id="sP" style="color:#a855f7">0</div></div>
     <div class="stat" style="border-left-color:#64748b;border-color:#64748b33"><div class="stat-l">Other</div><div class="stat-v" id="sO" style="color:#64748b">0</div></div>
+    <div class="stat" style="border-left-color:#f97316;border-color:#f9731633"><div class="stat-l">Dark Ships</div><div class="stat-v" id="sD" style="color:#f97316">0</div></div>
   </div>
   <div class="controls">
     <input type="text" id="q" placeholder="Search name, IMO, flag, destination..." oninput="render()" />
@@ -117,7 +119,7 @@
   </div>
 </div>
 
-<div class="footer">Data source: aisstream.io via GitHub Actions • Coverage: West of Strait of Hormuz • Built by Sri @ Gibson Shipbrokers, Singapore </div>
+<div class="footer">Data sources: aisstream.io (AIS) + Planet Insights (satellite) via GitHub Actions • Coverage: West of Strait of Hormuz • Built by Sri @ Gibson Shipbrokers, Singapore</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
@@ -143,6 +145,7 @@ const COLS=[
   {k:"IMO",l:"IMO"},{k:"Name",l:"Vessel Name"},{k:"Type",l:"Type"},
   {k:"Length_m",l:"Length (m)",n:1},{k:"Beam_m",l:"Beam (m)",n:1},{k:"Draught_m",l:"Draught (m)",n:1},
   {k:"Flag",l:"Flag"},{k:"Nav_Status",l:"Status"},{k:"SOG_kn",l:"SOG (kn)",n:1},{k:"Destination",l:"Destination"},
+  {k:"Source",l:"Source"},
 ];
 
 function parseCSV(text) {
@@ -199,9 +202,9 @@ function doSort(k){ if(sf===k) sd=sd==="asc"?"desc":"asc"; else {sf=k;sd="asc";}
 
 function render(){
   const q=($("q").value||"").toLowerCase(), tf=$("tf").value;
-  let tK=0,cK=0,pK=0,oK=0;
-  V.forEach(v=>{const c=cat(v.Type); if(c==="tanker")tK++;else if(c==="cargo")cK++;else if(c==="passenger")pK++;else oK++;});
-  $("sT").textContent=tK;$("sC").textContent=cK;$("sP").textContent=pK;$("sO").textContent=oK;$("tc").textContent=V.length;
+  let tK=0,cK=0,pK=0,oK=0,dK=0;
+  V.forEach(v=>{const c=cat(v.Type); if(c==="tanker")tK++;else if(c==="cargo")cK++;else if(c==="passenger")pK++;else oK++; if((v.Source||"").toLowerCase()==="satellite")dK++;});
+  $("sT").textContent=tK;$("sC").textContent=cK;$("sP").textContent=pK;$("sO").textContent=oK;$("sD").textContent=dK;$("tc").textContent=V.length;
 
   let f=V;
   if(tf!=="all") f=f.filter(v=>cat(v.Type)===tf);
@@ -216,7 +219,7 @@ function render(){
     if(av<bv) return sd==="asc"?-1:1; if(av>bv) return sd==="asc"?1:-1; return 0;
   });
 
-  if(!f.length){$("tb").innerHTML='<tr><td colspan="10" class="empty">No vessels match your filters.</td></tr>';return;}
+  if(!f.length){$("tb").innerHTML='<tr><td colspan="11" class="empty">No vessels match your filters.</td></tr>';return;}
 
   let html="";
   for(const v of f){
@@ -232,6 +235,10 @@ function render(){
     html+=`<td style="font-size:11px"><span class="${nc(v.Nav_Status)}">${v.Nav_Status||"—"}</span></td>`;
     html+=`<td class="cd">${v.SOG_kn||"—"}</td>`;
     html+=`<td class="cx">${v.Destination||"—"}</td>`;
+    const src=v.Source||"AIS"; let srcCls="src-ais",srcLbl=src;
+    if(src==="Satellite"){srcCls="src-sat";srcLbl="Satellite";}
+    else if(src==="AIS+Satellite"){srcCls="src-both";srcLbl="AIS+Sat";}
+    html+=`<td style="font-size:11px"><span class="${srcCls}">${srcLbl}</span></td>`;
     html+=`</tr>`;
   }
   $("tb").innerHTML=html;

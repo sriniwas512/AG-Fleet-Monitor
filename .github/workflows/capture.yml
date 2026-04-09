@@ -23,7 +23,7 @@ jobs:
         env:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
           PLANET_API_KEY: ${{ secrets.PLANET_API_KEY }}
-          PLANET_COLLECTION_ID: ${{ secrets.PLANET_COLLECTION_ID }}
+          PLANET_SUBSCRIPTION_ID: ${{ secrets.PLANET_SUBSCRIPTION_ID }}
           CAPTURE_DURATION: '1800'
           OUTPUT_FILE: 'data/ag_fleet_latest.csv'
         run: |
